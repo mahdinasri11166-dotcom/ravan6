@@ -164,7 +164,6 @@ class AppointmentViewModel(
         } catch (_: Exception) { "" }
         val last = settingsRepository.lastAppVersion.first()
         if (last.isNotBlank() && last != current) {
-            // نسخه عوض شده — پرچم برای UI بکاپ
             settingsRepository.setLastAppVersion(current)
         } else if (last.isBlank()) {
             settingsRepository.setLastAppVersion(current)
@@ -172,10 +171,48 @@ class AppointmentViewModel(
     }
 
     val needsBackupAfterUpdate: StateFlow<Boolean> = settingsRepository.lastAppVersion
-        .map { false } // نمایش از طریق پیام در Settings/Today با مقایسه دستی
+        .map { false }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    private fun currentTherapistName(): String {
+    // 👇 این توابع اضافه شدند 👇
+    private suspend fun ensureAutoTrial() {
+        if (settingsRepository.trialStartMillis.first() == 0L) {
+            settingsRepository.setTrialStartMillis(System.currentTimeMillis())
+        }
+    }
+
+    private suspend fun ensureDefaultTherapist() {
+        if (therapistDao.getActive().first().isEmpty()) {
+            therapistDao.insert(
+                Therapist(
+                    name = "درمانگر اصلی",
+                    role = UserRole.OWNER,
+                    isActive = true
+                )
+            )
+        }
+    }
+
+    private suspend fun ensureDefaultClinic() {
+        if (settingsRepository.clinicName.first().isBlank()) {
+            settingsRepository.setClinicName("مرکز گل سرخ")
+        }
+    }
+
+    fun setCurrentTherapist(id: Long) = viewModelScope.launch {
+        settingsRepository.setCurrentTherapistId(id)
+    }
+
+    fun addTherapist(name: String, role: UserRole = UserRole.THERAPIST) = viewModelScope.launch {
+        therapistDao.insert(Therapist(name = name.trim(), role = role, isActive = true))
+    }
+
+    fun setDefaultSessionFee(fee: Double) = viewModelScope.launch {
+        settingsRepository.setDefaultSessionFee(fee)
+    }
+    // 👆 ----------------- 👆
+
+    fun currentTherapistName(): String {
         val id = currentTherapistId.value
         return therapists.value.find { it.id == id }?.name
             ?: defaultTherapistName.value.ifBlank { "درمانگر" }
@@ -224,7 +261,6 @@ class AppointmentViewModel(
     fun setTipsDone(v: Boolean) = viewModelScope.launch { settingsRepository.setTipsDone(v) }
     fun setAutoBackupEnabled(v: Boolean) = viewModelScope.launch { settingsRepository.setAutoBackupEnabled(v) }
 
-    /** کد سازمانی: پیشوند ORG- روی همان مجموعه کدهای Pro */
     fun unlockWithCode(code: String): Boolean {
         val raw = code.trim().uppercase().replace(" ", "")
         val isOrgCode = raw.startsWith("ORG")
@@ -294,51 +330,22 @@ class AppointmentViewModel(
     fun getQuestionnaires(clientId: Long) = repository.getQuestionnaires(clientId)
 
     companion object {
-        /** سقف مراجع در نسخه رایگان */
         const val FREE_CLIENT_LIMIT = 50
-        /** مدت نسخه آزمایشی حرفه‌ای (روز) */
         const val TRIAL_DAYS = 14
-        /**
-         * آزمون‌های غربالگری آزاد در نسخه رایگان.
-         * بقیه آزمون‌ها فقط با Pro یا دوره آزمایشی.
-         */
         val FREE_ASSESSMENT_IDS: Set<String> = setOf(
             "PHQ9", "GAD7", "K6", "PSS10", "WHO5",
             "AUDIT_C", "CAGE", "SCOFF", "ISI", "GDS15"
         )
 
-        /** کدهای فعال‌سازی Pro — فقط در سورس؛ در UI نمایش داده نمی‌شوند. */
         private val PRO_UNLOCK_CODES: Set<String> = setOf(
-            "XK7M2Q9PL4RN8WVH",
-            "B3T9F6HJ2KD8YQWZ",
-            "N5R8C1VX4M7P2LQJ",
-            "W6Y2D9KS3HF7T1BN",
-            "P4J8M3QG6ZL9R2XC",
-            "H7K1V5TN9BW4D6SY",
-            "R2X9L4FQ8MC7P3JH",
-            "T6N3Y8KD1VS5W9BG",
-            "C9F4H2MJ7QX6L1PR",
-            "Z5W8B3TN6YK2D9HS",
-            "Q1L7P9RX4VF3M8JC",
-            "G8D2S6HY5NK9T4BW",
-            "M3J9V1FC7PL5R8XQ",
-            "Y4K6N2TW9BH7D3SG",
-            "F7P1X5QL8JM4C9RV",
-            "D9S3H6YB2WK8N5TG",
-            "L2C8R4VX7MQ1P6JF",
-            "K5T9W3ND8YS2H7BG",
-            "V6M1J4FQ9PL3X8RC",
-            "S8H2Y7BK5TN9D4WG",
-            "J3P9L6XC2RF8M1QV",
-            "N7W4D1HS9YK6T3BG",
-            "X2Q8C5MJ4PL9R7VF",
-            "B9T6K3YN8HS1D5WG",
-            "P1F7R4VX6MQ9L2JC",
-            "H5Y9S2BW7NK4T8DG",
-            "R8L3M6JQ1XC5P9VF",
-            "T4N7K1YD9HS6W2BG",
-            "C6F2H8PX3QL9M5RJ",
-            "Z9W5B1TN7YK4D8HS"
+            "XK7M2Q9PL4RN8WVH", "B3T9F6HJ2KD8YQWZ", "N5R8C1VX4M7P2LQJ", "W6Y2D9KS3HF7T1BN",
+            "P4J8M3QG6ZL9R2XC", "H7K1V5TN9BW4D6SY", "R2X9L4FQ8MC7P3JH", "T6N3Y8KD1VS5W9BG",
+            "C9F4H2MJ7QX6L1PR", "Z5W8B3TN6YK2D9HS", "Q1L7P9RX4VF3M8JC", "G8D2S6HY5NK9T4BW",
+            "M3J9V1FC7PL5R8XQ", "Y4K6N2TW9BH7D3SG", "F7P1X5QL8JM4C9RV", "D9S3H6YB2WK8N5TG",
+            "L2C8R4VX7MQ1P6JF", "K5T9W3ND8YS2H7BG", "V6M1J4FQ9PL3X8RC", "S8H2Y7BK5TN9D4WG",
+            "J3P9L6XC2RF8M1QV", "N7W4D1HS9YK6T3BG", "X2Q8C5MJ4PL9R7VF", "B9T6K3YN8HS1D5WG",
+            "P1F7R4VX6MQ9L2JC", "H5Y9S2BW7NK4T8DG", "R8L3M6JQ1XC5P9VF", "T4N7K1YD9HS6W2BG",
+            "C6F2H8PX3QL9M5RJ", "Z9W5B1TN7YK4D8HS"
         )
     }
 
@@ -537,7 +544,6 @@ class AppointmentViewModel(
         )
     }
 
-    /** ذخیره فایل پشتیبان روی گوشی و برگرداندن مسیر فایل */
     suspend fun saveBackupToDevice(): File {
         val json = exportBackupJson()
         return BackupHelper.saveToAppStorage(appContext, json)
@@ -546,11 +552,7 @@ class AppointmentViewModel(
     suspend fun importBackupJson(json: String): Result<String> {
         return try {
             val parsed = BackupHelper.parse(json)
-            // Map old client ids -> new ids
             val idMap = mutableMapOf<Long, Long>()
-            // We don't have original ids in Client after parse (set to 0).
-            // Rebuild by index order: backup clients keep sequential correspondence via appointments' clientId.
-            // So re-parse clients with original ids from JSON for mapping.
             val rootClients = org.json.JSONObject(json).optJSONArray("clients") ?: org.json.JSONArray()
             for (i in 0 until rootClients.length()) {
                 val o = rootClients.getJSONObject(i)
@@ -649,7 +651,6 @@ class AppointmentViewModel(
         }
     }
 
-    
     suspend fun getClientWorkshopLinks(clientId: Long): List<Pair<com.therapist.assistant.data.Workshop, com.therapist.assistant.data.WorkshopParticipant>> {
         val parts = workshopDao.getParticipantsByClient(clientId)
         return parts.mapNotNull { p ->
@@ -662,7 +663,6 @@ class AppointmentViewModel(
         viewModelScope.launch { workshopDao.delete(w) }
     }
 
-    
     fun quickCreateClient(name: String, onCreated: (Long) -> Unit = {}) {
         viewModelScope.launch {
             if (!hasProAccess() && repository.getClientCount() >= clientLimitForPlan()) {
@@ -755,7 +755,6 @@ class AppointmentViewModel(
             .replace("-", "")
             .replace("_", "")
         if (normalized !in PRO_UNLOCK_CODES) return false
-        // یک‌بارمصرف روی همین دستگاه
         viewModelScope.launch {
             val used = settingsRepository.usedProCodes.first().split(',').filter { it.isNotBlank() }.toMutableSet()
             if (normalized in used) return@launch
@@ -766,11 +765,9 @@ class AppointmentViewModel(
         return true
     }
 
-    /** اگر کد قبلاً روی این دستگاه مصرف شده باشد false */
     suspend fun isCodeAlreadyUsed(code: String): Boolean {
         val normalized = code.trim().uppercase().replace(" ", "").replace("-", "").replace("_", "")
         val used = settingsRepository.usedProCodes.first().split(',').filter { it.isNotBlank() }
         return normalized in used
     }
-
 }
